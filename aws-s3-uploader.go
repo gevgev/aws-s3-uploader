@@ -15,13 +15,12 @@ import (
 var (
 	inExtension string
 	bucket      string
+	searchDir   string
 )
 
 func main() {
 
-	searchDir := "/Users/ggevorgyan/git/go/src/github.com/gevgev/cdwdatagetter/cdw-data-reports/"
-
-	flagSearchDir := flag.String("p", searchDir, "`path` to traverse")
+	flagSearchDir := flag.String("p", ".", "`path` to traverse")
 	flagFilterExt := flag.String("f", "csv", "`Extention` to filter")
 	flagBucketname := flag.String("b", "rovi-daap-test", "AWS S3 `bucket` name")
 
@@ -48,8 +47,6 @@ func main() {
 	for _, file := range fileList {
 		if isFileToPush(file) {
 			log.Println("Pushing: ", file)
-			log.Println("Key: ", filepath.Dir(file))
-			log.Println("File Name:", filepath.Base(file))
 			uploadFile(file, bucket)
 		}
 		fmt.Println(file)
