@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -16,6 +18,7 @@ var (
 	inExtension string
 	bucket      string
 	searchDir   string
+	msoNames    map[string]string
 )
 
 func main() {
@@ -23,6 +26,7 @@ func main() {
 	flagSearchDir := flag.String("p", ".", "`path` to traverse")
 	flagFilterExt := flag.String("f", "csv", "`Extention` to filter")
 	flagBucketname := flag.String("b", "rovi-daap-test", "AWS S3 `bucket` name")
+	flagMsoNames := flag.String("m", "mso-list.csv", "`MSO` ID to names lookup file")
 
 	flag.Parse()
 	if !flag.Parsed() {
@@ -33,6 +37,7 @@ func main() {
 	searchDir = *flagSearchDir
 	inExtension = *flagFilterExt
 	bucket = *flagBucketname
+	msoNames = getMsoNamesList(*flagMsoNames)
 
 	fileList := []string{}
 	err := filepath.Walk(searchDir, func(path string, f os.FileInfo, err error) error {
@@ -70,7 +75,7 @@ func uploadFile(fileName, bucket string) {
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Body:   file,
 		Bucket: aws.String(bucket),
-		Key:    aws.String(fileName),
+		Key:    aws.String(replaceIdByMSOName(fileName)),
 	})
 	if err != nil {
 		log.Println("Failed to upload", err)
@@ -79,4 +84,36 @@ func uploadFile(fileName, bucket string) {
 
 	log.Println("Successfully uploaded to", result.Location)
 
+}
+
+type MsoType struct {
+	Code string
+	Name string
+}
+
+func replaceIdByMSOName(str string) string {
+	segments := strings.Split(str, "/")
+	msoId := segments[2]
+
+	return strings.Replace(str, msoId, msoNames[msoId], 2)
+}
+
+func getMsoNamesList(msoListFilename string) map[string]string {
+	msoList := make(map[string]string)
+
+	msoFile, err := os.Open(msoListFilename)
+	if err != nil {
+		log.Fatalf("Could not open Mso List file: %s, Error: %s\n", msoListFilename, err)
+	}
+
+	r := csv.NewReader(msoFile)
+	records, err := r.ReadAll()
+	if err != nil {
+		log.Fatalf("Could not read MSO file: %s, Error: %s\n", msoListFilename, err)
+	}
+
+	for _, record := range records {
+		msoList[record[0]] = record[1]
+	}
+	return msoList
 }
