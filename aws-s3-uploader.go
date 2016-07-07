@@ -96,7 +96,7 @@ func uploadFile(fileName, bucket string) {
 }
 
 func replaceExtensionToZip(filename string) string {
-	return strings.Replace(filename, ".csv", ".zip", 1)
+	return strings.Replace(filename, ".csv", ".csv.gzip", 1)
 }
 
 func zipUploadFile(fileName, bucket string) {
