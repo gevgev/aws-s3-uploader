@@ -1,9 +1,11 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,7 +20,8 @@ var (
 	inExtension string
 	bucket      string
 	searchDir   string
-	msoNames    map[string]string
+	MSONames    map[string]string
+	zipFiles    bool
 )
 
 func main() {
@@ -26,7 +29,8 @@ func main() {
 	flagSearchDir := flag.String("p", ".", "`path` to traverse")
 	flagFilterExt := flag.String("f", "csv", "`Extention` to filter")
 	flagBucketname := flag.String("b", "rovi-daap-test", "AWS S3 `bucket` name")
-	flagMsoNames := flag.String("m", "mso-list.csv", "`MSO` ID to names lookup file")
+	flagMSONames := flag.String("m", "mso-list.csv", "`MSO` ID to names lookup file")
+	flagZipFiles := flag.Bool("z", false, "`Zip` files before uploading to AWS S3")
 
 	flag.Parse()
 	if !flag.Parsed() {
@@ -37,7 +41,8 @@ func main() {
 	searchDir = *flagSearchDir
 	inExtension = *flagFilterExt
 	bucket = *flagBucketname
-	msoNames = getMsoNamesList(*flagMsoNames)
+	MSONames = getMSONamesList(*flagMSONames)
+	zipFiles = *flagZipFiles
 
 	fileList := []string{}
 	err := filepath.Walk(searchDir, func(path string, f os.FileInfo, err error) error {
@@ -52,7 +57,11 @@ func main() {
 	for _, file := range fileList {
 		if isFileToPush(file) {
 			log.Println("Pushing: ", file)
-			uploadFile(file, bucket)
+			if zipFiles {
+				zipUploadFile(file, bucket)
+			} else {
+				uploadFile(file, bucket)
+			}
 		}
 		fmt.Println(file)
 	}
@@ -75,7 +84,7 @@ func uploadFile(fileName, bucket string) {
 	result, err := uploader.Upload(&s3manager.UploadInput{
 		Body:   file,
 		Bucket: aws.String(bucket),
-		Key:    aws.String(replaceIdByMSOName(fileName)),
+		Key:    aws.String(replaceIDByMSOName(fileName)),
 	})
 	if err != nil {
 		log.Println("Failed to upload", err)
@@ -86,34 +95,71 @@ func uploadFile(fileName, bucket string) {
 
 }
 
-type MsoType struct {
+func replaceExtensionToZip(filename string) string {
+	return strings.Replace(filename, ".csv", ".zip", 1)
+}
+
+func zipUploadFile(fileName, bucket string) {
+	file, err := os.Open(fileName)
+	if err != nil {
+		log.Println("Failed to open file", err)
+		return
+	}
+
+	// Not required, but you could zip the file before uploading it
+	// using io.Pipe read/writer to stream gzip'd file contents.
+	reader, writer := io.Pipe()
+	go func() {
+		gw := gzip.NewWriter(writer)
+		io.Copy(gw, file)
+
+		file.Close()
+		gw.Close()
+		writer.Close()
+	}()
+	uploader := s3manager.NewUploader(session.New(&aws.Config{Region: aws.String("us-west-2")}))
+	result, err := uploader.Upload(&s3manager.UploadInput{
+		Body:   reader,
+		Bucket: aws.String(bucket),
+		Key:    aws.String(replaceIDByMSOName(replaceExtensionToZip(fileName))),
+	})
+	if err != nil {
+		log.Fatalln("Failed to upload", err)
+	}
+
+	log.Println("Successfully uploaded to", result.Location)
+}
+
+// MSOType structure for MSO name and ID
+type MSOType struct {
 	Code string
 	Name string
 }
 
-func replaceIdByMSOName(str string) string {
+func replaceIDByMSOName(str string) string {
 	segments := strings.Split(str, "/")
-	msoId := segments[2]
+	MSOID := segments[2]
 
-	return strings.Replace(str, msoId, msoNames[msoId], 2)
+	return strings.Replace(str, MSOID, MSONames[MSOID], 2)
 }
 
-func getMsoNamesList(msoListFilename string) map[string]string {
-	msoList := make(map[string]string)
+func getMSONamesList(MSOListFilename string) map[string]string {
+	MSOList := make(map[string]string)
 
-	msoFile, err := os.Open(msoListFilename)
+	MSOFile, err := os.Open(MSOListFilename)
 	if err != nil {
-		log.Fatalf("Could not open Mso List file: %s, Error: %s\n", msoListFilename, err)
+		log.Fatalf("Could not open MSO List file: %s, Error: %s\n", MSOListFilename, err)
 	}
 
-	r := csv.NewReader(msoFile)
+	r := csv.NewReader(MSOFile)
+	r.TrimLeadingSpace = true
 	records, err := r.ReadAll()
 	if err != nil {
-		log.Fatalf("Could not read MSO file: %s, Error: %s\n", msoListFilename, err)
+		log.Fatalf("Could not read MSO file: %s, Error: %s\n", MSOListFilename, err)
 	}
 
 	for _, record := range records {
-		msoList[record[0]] = record[1]
+		MSOList[record[0]] = record[1]
 	}
-	return msoList
+	return MSOList
 }
