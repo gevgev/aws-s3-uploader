@@ -17,11 +17,12 @@ import (
 )
 
 var (
-	inExtension string
-	bucket      string
-	searchDir   string
-	MSONames    map[string]string
-	zipFiles    bool
+	inExtension      string
+	bucket           string
+	searchDir        string
+	MSONames         map[string]string
+	zipFiles         bool
+	fileNamesPattern string
 )
 
 func main() {
@@ -31,6 +32,7 @@ func main() {
 	flagBucketname := flag.String("b", "rovi-daap-test", "AWS S3 `bucket` name")
 	flagMSONames := flag.String("m", "mso-list.csv", "`MSO` ID to names lookup file")
 	flagZipFiles := flag.Bool("z", false, "`Zip` files before uploading to AWS S3")
+	flagFileNames := flag.String("n", "", "Filename pattern")
 
 	flag.Parse()
 	if !flag.Parsed() {
@@ -43,9 +45,22 @@ func main() {
 	bucket = *flagBucketname
 	MSONames = getMSONamesList(*flagMSONames)
 	zipFiles = *flagZipFiles
+	fileNamesPattern = *flagFileNames
 
 	fileList := []string{}
 	err := filepath.Walk(searchDir, func(path string, f os.FileInfo, err error) error {
+
+		if f.IsDir() {
+			return nil
+		}
+
+		if fileNamesPattern != "" {
+			if strings.Contains(path, fileNamesPattern) {
+				fileList = append(fileList, path)
+			}
+			return nil
+		}
+
 		fileList = append(fileList, path)
 		return nil
 	})
